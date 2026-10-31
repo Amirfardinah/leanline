@@ -67,7 +67,10 @@ header.top { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; b
 .brand { font-family: var(--display); font-weight: 700; font-size: 1.15rem; display: flex; align-items: center; gap: .45rem; }
 .brand i { width: 10px; height: 22px; border-radius: 3px; background: var(--accent); display: inline-block; transform: skewX(-14deg); }
 .datenav { display: flex; align-items: center; gap: .2rem; }
-.datenav .d { font-weight: 600; min-width: 7.5rem; text-align: center; }
+.datenav .d { font-weight: 600; min-width: 6.5rem; text-align: center; }
+.seg.users { font-family: var(--body); width: 9.5rem; }
+.seg.users button { padding: .35rem .3rem; }
+.seg.users button[aria-pressed="true"] { background: var(--accent); color: var(--accent-fg); }
 
 /* summary */
 .summary { background: var(--surface); border-radius: var(--r); padding: 1rem; display: grid; grid-template-columns: auto 1fr; gap: 1.1rem; align-items: center; border: 1px solid var(--line); }
@@ -147,7 +150,7 @@ a { color: var(--accent); }
 <body>
 
 <header class="top"><div class="wrap topbar">
-  <div class="brand"><i></i>Leanline</div>
+  <div class="brand"><i></i><div class="seg users" id="userSeg" role="group" aria-label="Who is logging"><button data-user="fred" aria-pressed="true">Fred</button><button data-user="mommy" aria-pressed="false">Mommy</button></div></div>
   <div class="datenav" id="datenav">
     <button class="iconbtn" id="prevDay" aria-label="Previous day"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M15 18l-6-6 6-6"/></svg></button>
     <div class="d" id="dateLabel">Today</div>
@@ -210,7 +213,7 @@ a { color: var(--accent); }
   <section id="view-plan" hidden>
     <div class="section">
       <div class="card">
-        <div class="row"><h2 class="grow">Your plan</h2>
+        <div class="row"><h2 class="grow" id="planTitle">Your plan</h2>
           <div class="seg" style="width:9rem" id="unitSeg"><button data-u="metric" aria-pressed="true">kg/cm</button><button data-u="imperial" aria-pressed="false">lb/in</button></div>
         </div>
         <div class="grid2">
@@ -327,11 +330,24 @@ a { color: var(--accent); }
 <script>
 "use strict";
 /* ---------- storage ---------- */
+// Each person keeps a separate diary, plan and weight log under their own key on this device.
 const KEY = "leanline.v1";
+const USERS = [{ id: "fred", name: "Fred" }, { id: "mommy", name: "Mommy" }];
 const blank = () => ({ profile: null, units: "metric", diary: {}, exercise: {}, weights: {}, foods: {}, recent: [], usdaKey: "" });
+let user = "fred";
+try { const u = localStorage.getItem(KEY + ".user"); if (USERS.some(x => x.id === u)) user = u; } catch (e) {}
 let S = blank();
-try { const raw = localStorage.getItem(KEY); if (raw) S = Object.assign(blank(), JSON.parse(raw)); } catch (e) {}
-function save() { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { toast("Couldn't save. Browser storage is blocked."); } }
+function load() {
+  S = blank();
+  try {
+    let raw = localStorage.getItem(KEY + "." + user);
+    if (!raw && user === "fred") raw = localStorage.getItem(KEY); // data saved before profiles existed belongs to Fred
+    if (raw) S = Object.assign(blank(), JSON.parse(raw));
+  } catch (e) {}
+}
+load();
+function save() { try { localStorage.setItem(KEY + "." + user, JSON.stringify(S)); } catch (e) { toast("Couldn't save. Browser storage is blocked."); } }
+const userName = () => USERS.find(x => x.id === user).name;
 
 /* ---------- helpers ---------- */
 const $ = (s, el = document) => el.querySelector(s);
@@ -440,8 +456,10 @@ $("#prevDay").onclick = () => { day = addDays(day, -1); renderDiary(); };
 $("#nextDay").onclick = () => { day = addDays(day, 1); renderDiary(); };
 
 /* ---------- navigation ---------- */
+let view = "diary";
 function go(v) {
   if (v === "scan") return openSheet(defaultMeal(), "scan");
+  view = v;
   ["diary", "progress", "plan"].forEach(x => $("#view-" + x).hidden = x !== v);
   $$("nav.tabs .t").forEach(b => b.setAttribute("aria-current", b.dataset.go === v ? "page" : "false"));
   $("#datenav").style.visibility = v === "diary" ? "visible" : "hidden";
@@ -753,6 +771,7 @@ function readPlanForm() {
   return p;
 }
 function renderPlan(draft) {
+  $("#planTitle").textContent = `${userName()}'s plan`;
   fillPlanForm(draft);
   const p = S.profile || draft || readPlanForm();
   const c = computePlan(p);
@@ -801,12 +820,12 @@ $("#usdaKey").value = S.usdaKey;
 $("#keySave").onclick = () => { S.usdaKey = $("#usdaKey").value.trim(); save(); toast(S.usdaKey ? "Key saved" : "Using the demo key"); };
 $("#exportBtn").onclick = () => {
   const blob = new Blob([JSON.stringify(S, null, 1)], { type: "application/json" });
-  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `leanline-backup-${todayISO()}.json`; a.click();
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `leanline-${user}-${todayISO()}.json`; a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 };
 $("#importFile").addEventListener("change", async e => {
   const f = e.target.files[0]; e.target.value = ""; if (!f) return;
-  try { const d = JSON.parse(await f.text()); if (typeof d !== "object" || !d.diary) throw 0; S = Object.assign(blank(), d); save(); toast("Backup restored"); go("plan"); }
+  try { const d = JSON.parse(await f.text()); if (typeof d !== "object" || !d.diary) throw 0; S = Object.assign(blank(), d); save(); toast(`Backup restored for ${userName()}`); go("plan"); }
   catch (err) { toast("That file isn't a Leanline backup"); }
 });
 
@@ -908,7 +927,22 @@ $("#wSave").onclick = () => {
   save(); $("#wVal").value = ""; renderProgress(); toast("Weight logged");
 };
 
+/* ---------- people ---------- */
+function markUser() { $$("#userSeg button").forEach(b => b.setAttribute("aria-pressed", b.dataset.user === user)); }
+$("#userSeg").addEventListener("click", e => {
+  const b = e.target.closest("[data-user]"); if (!b || b.dataset.user === user) return;
+  user = b.dataset.user;
+  try { localStorage.setItem(KEY + ".user", user); } catch (err) {}
+  if (!$("#scrim").hidden) closeSheet();
+  load(); day = todayISO(); online = { usda: [], off: [] }; $("#q").value = "";
+  $("#usdaKey").value = S.usdaKey; $("#pSaved").textContent = "";
+  markUser();
+  go(S.profile ? view : "plan");
+  toast(`Now logging for ${userName()}`);
+});
+
 /* ---------- boot ---------- */
+markUser();
 go(S.profile ? "diary" : "plan");
 </script>
 </body>
