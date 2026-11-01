@@ -6,7 +6,6 @@
 <title>Leanline Calorie Tracker</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Figtree:wght@400;500;600;700&display=swap">
-<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <style>
 /* Layout: one phone-width column; sticky date header, diary of meal cards, bottom tab bar, add-food sheet */
 :root {
@@ -129,8 +128,18 @@ nav.tabs .fab { width: 54px; height: 54px; border-radius: 50%; border: 0; backgr
 .res .n div:first-child { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chip { font-size: .68rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; padding: .1rem .4rem; border-radius: 5px; background: var(--surface-2); color: var(--muted); }
 .chip.usda { color: var(--protein); } .chip.off { color: var(--warn); } .chip.mine { color: var(--accent); }
-#reader { width: 100%; border-radius: var(--r); overflow: hidden; background: #000; min-height: 220px; }
-#reader video { border-radius: var(--r); }
+#reader { position: relative; width: 100%; border-radius: var(--r); overflow: hidden; background: #000; min-height: 220px; display: grid; place-items: center; }
+#reader video { display: block; width: 100%; max-height: 52vh; object-fit: cover; }
+#reader .guide { position: absolute; left: 10%; right: 10%; top: 30%; bottom: 30%; border: 3px solid #fff; border-radius: 12px; box-shadow: 0 0 0 999px rgba(0,0,0,.35); pointer-events: none; }
+#reader .guide::after { content: ""; position: absolute; left: 6%; right: 6%; top: 50%; height: 2px; background: #ff4d4d; box-shadow: 0 0 8px #ff4d4d; }
+#reader:not(.live) .guide, #reader:not(.live) video { display: none; }
+#reader .idle { color: #cfd8d2; font-size: .9rem; padding: 1rem; text-align: center; }
+#reader.live .idle { display: none; }
+#torchBtn { position: absolute; right: .6rem; bottom: .6rem; z-index: 2; }
+.stores { display: flex; gap: .35rem; overflow-x: auto; padding: .1rem 0 .2rem; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+.stores::-webkit-scrollbar { display: none; }
+.stores button { flex: none; white-space: nowrap; border: 1px solid var(--line); background: var(--surface); color: var(--muted); border-radius: 999px; padding: .3rem .75rem; font-size: .82rem; font-weight: 600; }
+.stores button[aria-pressed="true"] { background: var(--accent); color: var(--accent-fg); border-color: transparent; }
 .detail-top { display: flex; gap: .8rem; align-items: center; }
 .detail-top img { width: 64px; height: 64px; object-fit: contain; border-radius: 10px; background: var(--surface); }
 .bigkcal { font-family: var(--display); font-size: 2.2rem; font-weight: 700; line-height: 1; }
@@ -238,7 +247,7 @@ a { color: var(--accent); }
       <div class="card" id="planOut"></div>
       <div class="card">
         <h3>Food database</h3>
-        <div class="small muted">Barcodes come from Open Food Facts. Generic foods come from USDA FoodData Central, which works with a shared demo key (about 30 searches an hour). For unlimited searches, get a free key at <a href="https://fdc.nal.usda.gov/api-key-signup" target="_blank" rel="noopener">fdc.nal.usda.gov</a> and paste it here.</div>
+        <div class="small muted">Barcodes and UK supermarket products come from Open Food Facts, a free shared database with hundreds of thousands of UK products. Generic raw ingredients come from USDA FoodData Central, which works with a shared demo key (about 30 searches an hour). For unlimited searches, get a free key at <a href="https://fdc.nal.usda.gov/api-key-signup" target="_blank" rel="noopener">fdc.nal.usda.gov</a> and paste it here.</div>
         <div class="row"><input type="text" id="usdaKey" class="grow" placeholder="USDA API key (optional)" autocomplete="off"><button class="btn ghost" id="keySave">Save</button></div>
       </div>
       <div class="card">
@@ -278,13 +287,14 @@ a { color: var(--accent); }
     <div class="sheet-b" id="sheetBody">
       <!-- search -->
       <div id="m-search" class="section" style="margin:0">
-        <input type="search" id="q" placeholder="Search foods, e.g. banana, greek yogurt, chicken breast" autocomplete="off">
+        <input type="search" id="q" placeholder="Search, e.g. Tesco baked beans, Warburtons crumpets" autocomplete="off">
+        <div class="stores" id="storeSeg" aria-label="Supermarket"></div>
         <div id="searchStatus" class="small muted"></div>
         <div id="searchResults"></div>
       </div>
       <!-- scan -->
       <div id="m-scan" class="section" style="margin:0" hidden>
-        <div id="reader"></div>
+        <div id="reader"><video id="scanVideo" playsinline muted autoplay></video><div class="guide"></div><div class="idle">Camera is off</div><button class="btn ghost" id="torchBtn" hidden>Light</button></div>
         <div id="scanStatus" class="small muted">Point the camera at the barcode and hold steady.</div>
         <div class="row">
           <button class="btn ghost" id="camBtn">Start camera</button>
@@ -491,6 +501,29 @@ const BUILTIN = [
   ["Sugar, white", 387, 0, 100, 0, 4, "1 tsp"], ["Dark chocolate 70–85%", 598, 7.8, 46, 43, 28, "1 oz"], ["Pizza, cheese", 266, 11, 33, 10, 107, "1 slice"],
   ["Hummus", 166, 7.9, 14, 9.6, 30, "2 tbsp"], ["Tofu, firm", 144, 17, 2.8, 8.7, 126, "1/2 cup"], ["Coca-Cola", 42, 0, 10.6, 0, 330, "1 can (330 ml)"],
   ["Orange juice", 45, .7, 10, .2, 248, "1 cup"], ["Coffee, black", 1, .1, 0, 0, 240, "1 cup"], ["Cappuccino, whole milk", 31, 1.7, 2.5, 1.6, 240, "1 cup"],
+  // Common UK foods (typical values per 100 g / 100 ml; exact figures vary by brand, so scan the pack when you can)
+  ["Semi-skimmed milk", 46, 3.5, 4.7, 1.7, 200, "1 glass (200 ml)"], ["Tea with semi-skimmed milk", 7, .5, .7, .2, 250, "1 mug"],
+  ["Tea with milk and 1 sugar", 14, .5, 2.3, .2, 250, "1 mug"], ["Coffee, latte (semi-skimmed)", 42, 2.9, 4.2, 1.5, 340, "1 regular cup"],
+  ["Weetabix", 362, 12, 69, 2, 37.5, "2 biscuits"], ["Porridge oats", 375, 11, 60, 8, 40, "40 g (dry)"], ["Cornflakes", 378, 7, 84, .9, 30, "30 g bowl"],
+  ["Crumpet", 182, 6.4, 37, .9, 55, "1 crumpet"], ["Bread, white, medium slice", 235, 8, 46, 1.9, 40, "1 slice"], ["Bread, wholemeal, medium slice", 230, 10, 40, 2.5, 40, "1 slice"],
+  ["Baked beans in tomato sauce", 75, 4.7, 12.5, .2, 207, "1/2 can (207 g)"], ["Marmite", 250, 39, 24, .1, 4, "1 thin spread"],
+  ["Back bacon, grilled", 287, 23, 0, 21.6, 25, "1 rasher"], ["Pork sausage, grilled", 294, 14.5, 9.8, 22, 40, "1 sausage"],
+  ["Black pudding", 297, 10, 16, 22, 30, "1 slice"], ["Beef mince 5% fat, cooked", 170, 28, 0, 6.5, 100, "100 g"],
+  ["Fish fingers, grilled", 200, 13, 18, 8.5, 28, "1 fish finger"], ["Fish in batter, fried", 220, 15, 13, 12, 180, "1 portion"],
+  ["Chips, chip shop", 239, 3.2, 30.5, 12.4, 200, "1 portion"], ["Oven chips, baked", 162, 3.2, 29.8, 4.2, 165, "1 portion"],
+  ["Jacket potato", 109, 2.6, 25, .2, 220, "1 medium"], ["Yorkshire pudding", 230, 7.5, 28, 10, 20, "1 pudding"],
+  ["Shepherd's pie", 110, 6, 10, 5, 300, "1 portion"], ["Chicken tikka masala", 130, 10, 6, 7.5, 350, "1 portion"],
+  ["Pilau rice", 165, 3, 29, 4, 200, "1 portion"], ["Naan bread, plain", 285, 8.7, 50, 6, 130, "1 naan"],
+  ["Sausage roll", 317, 9, 23, 21, 103, "1 roll"], ["Cornish pasty", 267, 6.7, 25, 16, 227, "1 pasty"],
+  ["Pork pie", 370, 10, 25, 26, 140, "1 pie"], ["Scotch egg", 241, 12, 13, 16, 113, "1 egg"],
+  ["Scone, plain", 362, 7.2, 53.8, 14.6, 70, "1 scone"], ["Hot cross bun", 290, 7.5, 51, 6, 70, "1 bun"],
+  ["Victoria sponge", 370, 4.5, 53, 16, 70, "1 slice"], ["Mince pie", 400, 3.8, 58, 16, 55, "1 pie"], ["Custard, ready made", 102, 2.9, 16, 2.9, 150, "1/3 pot"],
+  ["Digestive biscuit", 476, 7.1, 63, 21, 14.7, "1 biscuit"], ["Chocolate digestive, milk", 500, 6.6, 62, 24, 16.6, "1 biscuit"],
+  ["Rich tea biscuit", 458, 7.2, 74, 14, 8.3, "1 biscuit"], ["Hobnob", 479, 7.6, 60, 22, 14, "1 biscuit"], ["Jaffa cake", 377, 3.6, 70, 8, 12.2, "1 cake"],
+  ["Crisps, ready salted", 524, 6, 52, 32, 25, "1 bag (25 g)"], ["Milk chocolate bar (Dairy Milk style)", 534, 7.3, 57, 30, 45, "1 bar (45 g)"],
+  ["Mars bar", 447, 4, 70, 17, 39.4, "1 bar"], ["KitKat, 4 finger", 507, 6.3, 61, 26, 41.5, "1 bar"], ["Quorn mince", 105, 14.5, 4.5, 2, 75, "75 g"],
+  ["Lager, 4%", 41, .3, 3.5, 0, 568, "1 pint"], ["Bitter / ale", 35, .3, 2.2, 0, 568, "1 pint"], ["Cider", 42, 0, 3.6, 0, 568, "1 pint"],
+  ["Wine, red", 80, .1, 2.6, 0, 175, "1 glass (175 ml)"], ["Wine, white", 76, .1, 2.6, 0, 175, "1 glass (175 ml)"],
 ].map(([name, kcal, p, c, f, servingG, servingLabel]) => ({ key: "b:" + name, name, per100: { kcal, p, c, f }, servingG, servingLabel, source: "basic" }));
 
 /* ---------- online lookups ---------- */
@@ -524,9 +557,39 @@ async function lookupBarcode(code) {
   if (j.status !== 1 || !j.product) return null;
   return offToFood(j.product, code);
 }
-async function searchOFF(q) {
-  const j = await getJSON(`https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(q)}&search_simple=1&action=process&json=1&page_size=15&fields=code,product_name,brands,nutriments,serving_size,serving_quantity,image_front_small_url`, 15000);
-  return (j.products || []).map(p => offToFood(p)).filter(f => f && f.name !== "Unnamed product");
+// Supermarket filter: matched against a product's brand and store fields, including the main own-label sub-brands.
+const STORES = [
+  ["", "All UK", []],
+  ["tesco", "Tesco", ["tesco"]],
+  ["sainsburys", "Sainsbury's", ["sainsbury"]],
+  ["asda", "Asda", ["asda"]],
+  ["morrisons", "Morrisons", ["morrison"]],
+  ["aldi", "Aldi", ["aldi", "specially selected", "everyday essentials", "harvest morn", "cowbelle", "brooklea", "the deli", "village bakery", "snackrite", "ashfield farm", "nature's pick", "4 seasons", "four seasons", "dominion", "holly lane", "stonemill", "greenvale", "oaklands", "mamia", "bramwells"]],
+  ["lidl", "Lidl", ["lidl", "milbona", "crownfield", "chef select", "freshona", "combino", "snaktastic", "dulano", "rowan hill", "birchwood", "solevita", "vitasia", "alesto", "baresa", "trattoria alfredo", "deluxe", "pilos", "kania", "mcennedy", "cien"]],
+  ["ms", "M&S", ["m&s", "m & s", "marks", "marks & spencer", "marks and spencer"]],
+  ["waitrose", "Waitrose", ["waitrose", "duchy"]],
+  ["coop", "Co-op", ["co-op", "co op", "coop"]],
+  ["iceland", "Iceland", ["iceland"]],
+];
+const storeOf = id => STORES.find(x => x[0] === id) || STORES[0];
+const inStore = (p, id) => { const al = storeOf(id)[2]; if (!al.length) return true; const t = ((p.brands || "") + "," + (p.stores || "")).toLowerCase(); return al.some(a => t.includes(a)); };
+const offCache = new Map();
+async function offSearchRaw(terms) {
+  const url = `https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(terms)}&search_simple=1&action=process&json=1&page_size=50`
+    + `&tagtype_0=countries&tag_contains_0=contains&tag_0=united-kingdom&sort_by=unique_scans_n`
+    + `&fields=code,product_name,product_name_en,brands,stores,nutriments,serving_size,serving_quantity,image_front_small_url`;
+  if (offCache.has(url)) return offCache.get(url);
+  const j = await getJSON(url, 20000);
+  const list = j.products || [];
+  offCache.set(url, list);
+  return list;
+}
+async function searchOFF(q, store) {
+  let raw = (await offSearchRaw(q)).filter(p => inStore(p, store));
+  // Few hits for this supermarket? Ask again with its name in the search terms.
+  if (store && raw.length < 8) raw = raw.concat((await offSearchRaw(q + " " + storeOf(store)[1])).filter(p => inStore(p, store)));
+  const seen = new Set();
+  return raw.map(p => offToFood(p)).filter(f => f && f.name !== "Unnamed product" && !seen.has(f.key) && seen.add(f.key)).slice(0, 30);
 }
 async function searchUSDA(q) {
   const key = S.usdaKey || "DEMO_KEY";
@@ -549,7 +612,7 @@ async function searchUSDA(q) {
 const titleCase = s => { s = String(s || ""); return s === s.toUpperCase() ? s.charAt(0) + s.slice(1).toLowerCase() : s; };
 
 /* ---------- sheet ---------- */
-let sheetMeal = "breakfast", mode = "search", prevMode = "search", scanner = null, scanBusy = false;
+let sheetMeal = "breakfast", mode = "search", prevMode = "search";
 $("#mealSel").innerHTML = MEALS.map(([k, n]) => `<option value="${k}">${n}</option>`).join("");
 $("#mealSel").onchange = e => sheetMeal = e.target.value;
 function openSheet(meal, m) {
@@ -572,15 +635,21 @@ function setMode(m) {
   $("#modeSeg").hidden = m === "detail";
   $("#backBtn").hidden = m !== "detail";
   $("#sheetTitle").textContent = m === "detail" ? "Amount" : "Add food";
-  if (m === "search") { renderSearch(); setTimeout(() => $("#q").focus(), 50); }
-  if (m === "scan") { $("#scanStatus").textContent = "Point the camera at the barcode and hold steady."; startScanner(); }
+  if (m === "search") { renderStores(); renderSearch(); setTimeout(() => $("#q").focus(), 50); }
+  if (m === "scan") { $("#scanStatus").textContent = ""; startScanner(); }
   if (m === "custom" && !$("#cCode").value) $("#customHint").textContent = "Save a food with its label values so you can reuse it. Values are per 100 g (or 100 ml).";
   $("#sheetBody").scrollTop = 0;
 }
 
 /* search */
 let searchSeq = 0, searchTimer = null, online = { usda: [], off: [] };
-$("#q").addEventListener("input", () => { clearTimeout(searchTimer); renderSearch(); searchTimer = setTimeout(runOnline, 550); });
+$("#q").addEventListener("input", () => { clearTimeout(searchTimer); renderSearch(); searchTimer = setTimeout(runOnline, 900); });
+function renderStores() { $("#storeSeg").innerHTML = STORES.map(([id, n]) => `<button data-store="${id}" aria-pressed="${(S.store || "") === id}">${esc(n)}</button>`).join(""); }
+$("#storeSeg").addEventListener("click", e => {
+  const b = e.target.closest("[data-store]"); if (!b) return;
+  S.store = b.dataset.store; save(); renderStores();
+  clearTimeout(searchTimer); runOnline();
+});
 $("#q").addEventListener("keydown", e => { if (e.key === "Enter") { clearTimeout(searchTimer); runOnline(); } });
 function localMatches(q) {
   const words = q.toLowerCase().split(/\s+/).filter(Boolean);
@@ -588,7 +657,7 @@ function localMatches(q) {
   return [...Object.values(S.foods).filter(hit), ...BUILTIN.filter(hit)].slice(0, 12);
 }
 function resRow(f) {
-  const chip = { usda: ["usda", "USDA"], off: ["off", "Product"], basic: ["", "Basic"], mine: ["mine", "Mine"] }[f.source] || ["", f.source];
+  const chip = { usda: ["usda", "USDA"], off: ["off", "UK"], basic: ["", "Basic"], mine: ["mine", "Mine"] }[f.source] || ["", f.source];
   const serv = f.servingG ? `${r0(f.per100.kcal * f.servingG / 100)} kcal per ${esc(f.servingLabel || r0(f.servingG) + " g")}` : `${r0(f.per100.kcal)} kcal per 100 g`;
   return `<button class="res" data-food="${esc(f.key)}"><div class="n"><div>${esc(f.name)}</div>
     <div class="small muted">${f.brand ? esc(f.brand) + " · " : ""}${serv}</div></div><span class="chip ${chip[0]}">${chip[1]}</span></button>`;
@@ -603,12 +672,13 @@ function renderSearch(status) {
     const rec = S.recent.map(k => S.foods[k]).filter(Boolean).slice(0, 15);
     add(rec);
     html = rec.length ? `<div class="label" style="margin-bottom:.4rem">Recent and saved foods</div><div class="results">${rec.map(resRow).join("")}</div>`
-      : `<div class="note">Type a food to search. Results come from your saved foods, a built-in list of basics, the USDA database (generic foods) and Open Food Facts (packaged products). Can't find it? Use <b>New food</b> and enter the label values.</div>`;
+      : `<div class="note">Type a food to search. Results come from your saved foods, a built-in list of common UK foods, UK supermarket products from Open Food Facts (Tesco, Sainsbury's, Asda, Morrisons, Aldi, Lidl, M&amp;S, Waitrose, Co-op, Iceland and more) and generic ingredients from USDA. Pick a supermarket above to see only its products. Can't find it? Use <b>New food</b> and enter the label values.</div>`;
     $("#searchStatus").textContent = "";
   } else {
     const loc = localMatches(q); add(loc); add(online.usda); add(online.off);
     const block = (title, list) => list.length ? `<div class="label" style="margin:.2rem 0 .4rem">${title}</div><div class="results">${list.map(resRow).join("")}</div>` : "";
-    html = block("Saved and basic foods", loc) + block("Generic foods · USDA", online.usda) + block("Packaged products · Open Food Facts", online.off);
+    const st = storeOf(S.store || "");
+    html = block("Saved and common UK foods", loc) + block(`${st[0] ? esc(st[1]) : "UK supermarket"} products · Open Food Facts`, online.off) + block("Generic ingredients · USDA", online.usda);
     if (status !== undefined) $("#searchStatus").innerHTML = status;
   }
   $("#searchResults").innerHTML = `<div class="section" style="margin:0">${html}</div>`;
@@ -626,44 +696,154 @@ async function runOnline() {
   await Promise.all([
     searchUSDA(q).then(r => { if (seq === searchSeq) { online.usda = r; renderSearch(`<span class="spinner"></span> Searching…`); } })
       .catch(e => errs.push(/429/.test(e.message) ? "USDA demo key is out of searches for now; add your own free key under Plan." : "USDA search didn't respond.")),
-    searchOFF(q).then(r => { if (seq === searchSeq) { online.off = r; renderSearch(`<span class="spinner"></span> Searching…`); } })
-      .catch(() => errs.push("Open Food Facts didn't respond; it can be slow, try again.")),
+    searchOFF(q, S.store || "").then(r => { if (seq === searchSeq) { online.off = r; renderSearch(`<span class="spinner"></span> Searching…`); } })
+      .catch(e => errs.push(/429/.test(e.message) ? "Open Food Facts allows about 10 searches a minute; wait a moment and press Enter to search again." : "Open Food Facts didn't respond; it can be slow, press Enter to try again.")),
   ]);
   done();
 }
 $("#searchResults").addEventListener("click", e => { const b = e.target.closest("[data-food]"); if (b && shown[b.dataset.food]) showDetail(shown[b.dataset.food]); });
 
-/* scanner */
-async function startScanner() {
-  if (scanner || !window.Html5Qrcode) { if (!window.Html5Qrcode) $("#scanStatus").textContent = "The scanner library didn't load. Check your connection, or type the barcode below."; return; }
-  const F = Html5QrcodeSupportedFormats;
+/* scanner: the phone's built-in barcode detector where it has one (Android Chrome), ZXing everywhere else (iPhone, desktop) */
+const SCAN_FORMATS = ["ean_13", "ean_8", "upc_a", "upc_e", "code_128"];
+let camStream = null, scanTimer = null, zx = null, nativeDet;
+const scanCanvas = document.createElement("canvas");
+function loadScript(src) { return new Promise((ok, bad) => { const el = document.createElement("script"); el.src = src; el.onload = ok; el.onerror = () => bad(new Error("load")); document.head.appendChild(el); }); }
+async function getNative() {
+  if (nativeDet !== undefined) return nativeDet;
+  nativeDet = null;
   try {
-    scanner = new Html5Qrcode("reader", { formatsToSupport: [F.EAN_13, F.EAN_8, F.UPC_A, F.UPC_E, F.CODE_128], verbose: false, useBarCodeDetectorIfSupported: true });
-    await scanner.start({ facingMode: "environment" }, { fps: 12, qrbox: (w, h) => ({ width: Math.min(300, w * .85), height: Math.min(150, h * .5) }) }, onScan, () => {});
-    $("#camBtn").textContent = "Stop camera";
-  } catch (e) {
-    scanner = null;
-    $("#scanStatus").textContent = "Camera isn't available (permission denied or no camera). Take a photo of the barcode instead, or type the digits.";
-    $("#camBtn").textContent = "Start camera";
+    if ("BarcodeDetector" in window) {
+      const have = await BarcodeDetector.getSupportedFormats();
+      const fm = SCAN_FORMATS.filter(f => have.includes(f));
+      if (fm.includes("ean_13")) nativeDet = new BarcodeDetector({ formats: fm });
+    }
+  } catch (e) {}
+  return nativeDet;
+}
+async function getZX() {
+  if (zx) return zx;
+  if (!window.ZXing) await loadScript("https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js");
+  const Z = window.ZXing, hints = new Map();
+  hints.set(Z.DecodeHintType.POSSIBLE_FORMATS, [Z.BarcodeFormat.EAN_13, Z.BarcodeFormat.EAN_8, Z.BarcodeFormat.UPC_A, Z.BarcodeFormat.UPC_E, Z.BarcodeFormat.CODE_128]);
+  hints.set(Z.DecodeHintType.TRY_HARDER, true);
+  const r = new Z.MultiFormatReader(); r.setHints(hints);
+  return zx = { Z, r };
+}
+function zxRead(canvas) {
+  const { Z, r } = zx;
+  try { return r.decodeWithState(new Z.BinaryBitmap(new Z.HybridBinarizer(new Z.HTMLCanvasElementLuminanceSource(canvas)))).getText(); }
+  catch (e) { return null; } finally { r.reset(); }
+}
+function drawTo(src, sx, sy, sw, sh, maxW) {
+  const k = Math.min(1, maxW / sw);
+  scanCanvas.width = Math.round(sw * k); scanCanvas.height = Math.round(sh * k);
+  const ctx = scanCanvas.getContext("2d", { willReadFrequently: true });
+  ctx.drawImage(src, sx, sy, sw, sh, 0, 0, scanCanvas.width, scanCanvas.height);
+  return scanCanvas;
+}
+async function readFrame(v) {
+  if (!v.videoWidth) return null;
+  if (nativeDet) { const r = await nativeDet.detect(v); return r.length ? r[0].rawValue : null; }
+  const vw = v.videoWidth, vh = v.videoHeight, cw = vw * .9, ch = vh * .55;   // a bit larger than the on-screen box
+  // Each frame is read at a different size, so a misread at one size is outvoted by the next frame.
+  const m = [1100, 640, 820][scanN++ % 3];
+  return zxRead(drawTo(v, (vw - cw) / 2, (vh - ch) / 2, cw, ch, m));
+}
+// EAN-8 / UPC-A / EAN-13 / GTIN-14 check digit; other lengths (shop labels, Code 128) pass through.
+function checksumOK(c) {
+  if (![8, 12, 13, 14].includes(c.length)) return true;
+  const d = [...c].map(Number), check = d.pop();
+  const sum = d.reverse().reduce((a, x, i) => a + x * (i % 2 ? 1 : 3), 0);
+  return (10 - sum % 10) % 10 === check;
+}
+let lastRead = "", scanN = 0, scanGen = 0;
+async function startScanner() {
+  if (camStream) return;
+  const gen = ++scanGen;   // stopScanner bumps this, cancelling a start that's still waiting on the camera
+  lastRead = "";
+  const st = $("#scanStatus");
+  if (!window.isSecureContext || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    st.textContent = "This browser can't open the camera on this page. Use a photo of the barcode, or type the digits."; return;
   }
+  st.innerHTML = `<span class="spinner"></span> Starting camera…`;
+  try { if (!(await getNative())) await getZX(); }
+  catch (e) { if (gen === scanGen) st.textContent = "The barcode reader didn't load. Check your connection, or type the digits below."; return; }
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } } });
+  } catch (e) {
+    if (gen !== scanGen) return;
+    st.innerHTML = e.name === "NotAllowedError"
+      ? "Camera access is blocked. On iPhone: Settings → Safari → Camera → Allow (or tap <b>aA</b> in the address bar → Website Settings). On Android: tap the lock icon by the address → Permissions → Camera. Then tap <b>Start camera</b>. You can also use a photo or type the digits."
+      : "No camera found or it's in use by another app. Use a photo of the barcode, or type the digits.";
+    return;
+  }
+  if (gen !== scanGen || mode !== "scan" || $("#scrim").hidden) { stream.getTracks().forEach(t => t.stop()); return; }
+  camStream = stream;
+  const v = $("#scanVideo"); v.srcObject = stream;
+  try { await v.play(); } catch (e) {}
+  $("#reader").classList.add("live");
+  const track = stream.getVideoTracks()[0];
+  try {
+    const caps = track.getCapabilities ? track.getCapabilities() : {};
+    if ((caps.focusMode || []).includes("continuous")) await track.applyConstraints({ advanced: [{ focusMode: "continuous" }] });
+    $("#torchBtn").hidden = !caps.torch;
+  } catch (e) {}
+  st.textContent = "Fit the barcode inside the box, about a hand's width away, in good light.";
+  $("#camBtn").textContent = "Stop camera";
+  scanTick();
+}
+async function scanTick() {
+  if (!camStream) return;
+  let code = null;
+  try { code = await readFrame($("#scanVideo")); } catch (e) {}
+  if (!camStream) return;
+  code = code ? String(code).replace(/\D/g, "") : "";
+  if (code.length >= 6 && checksumOK(code)) {
+    // Blurry frames can misread a digit, so accept a code only once two reads agree.
+    if (code === lastRead) { await stopScanner(); if (navigator.vibrate) navigator.vibrate(60); handleCode(code); return; }
+    lastRead = code;
+  }
+  scanTimer = setTimeout(scanTick, nativeDet ? 100 : 40);
 }
 async function stopScanner() {
-  const s = scanner; scanner = null; $("#camBtn").textContent = "Start camera";
-  if (s) { try { await s.stop(); s.clear(); } catch (e) {} }
+  scanGen++; clearTimeout(scanTimer);
+  const s = camStream; camStream = null;
+  if (s) s.getTracks().forEach(t => t.stop());
+  const v = $("#scanVideo"); v.srcObject = null;
+  $("#reader").classList.remove("live"); $("#torchBtn").hidden = true; $("#torchBtn").setAttribute("aria-pressed", "false");
+  $("#camBtn").textContent = "Start camera";
 }
-$("#camBtn").onclick = () => scanner ? stopScanner() : startScanner();
-async function onScan(text) {
-  if (scanBusy) return; scanBusy = true;
-  await stopScanner();
-  await handleCode(text);
-  scanBusy = false;
+$("#camBtn").onclick = () => camStream ? stopScanner() : startScanner();
+$("#torchBtn").onclick = async () => {
+  if (!camStream) return;
+  const on = $("#torchBtn").getAttribute("aria-pressed") !== "true";
+  try { await camStream.getVideoTracks()[0].applyConstraints({ advanced: [{ torch: on }] }); $("#torchBtn").setAttribute("aria-pressed", on); } catch (e) {}
+};
+async function readPhoto(file) {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = new Image(); img.src = url; await img.decode();
+    const det = await getNative();
+    if (det) { try { const r = await det.detect(img); if (r.length) return r[0].rawValue; } catch (e) {} }
+    await getZX();
+    const W = img.naturalWidth, H = img.naturalHeight;
+    // Try the whole photo at a few sizes, then the middle of it.
+    for (const [x, y, w, h, m] of [[0, 0, W, H, 1400], [0, 0, W, H, 900], [0, 0, W, H, 2200], [W * .1, H * .25, W * .8, H * .5, 1400], [0, 0, W, H, 600]]) {
+      const c = zxRead(drawTo(img, x, y, w, h, m)); if (c) return c;
+    }
+    return null;
+  } finally { URL.revokeObjectURL(url); }
 }
 $("#scanFile").addEventListener("change", async e => {
   const file = e.target.files[0]; e.target.value = ""; if (!file) return;
   await stopScanner();
   $("#scanStatus").innerHTML = `<span class="spinner"></span> Reading barcode from photo…`;
-  try { const fileScanner = new Html5Qrcode("reader"); const code = await fileScanner.scanFile(file, false); fileScanner.clear(); handleCode(code); }
-  catch (err) { $("#scanStatus").textContent = "Couldn't find a barcode in that photo. Get closer, keep it sharp and flat, or type the digits."; }
+  let code = null;
+  try { code = await readPhoto(file); } catch (err) {}
+  if (mode !== "scan" || $("#scrim").hidden) return;   // they moved on while the photo was being read
+  if (code) handleCode(code);
+  else $("#scanStatus").textContent = "Couldn't find a barcode in that photo. Fill the photo with the barcode, keep it sharp and flat, or type the digits.";
 });
 $("#codeGo").onclick = () => { const c = $("#codeInput").value.trim(); if (c) handleCode(c); };
 $("#codeInput").addEventListener("keydown", e => { if (e.key === "Enter") $("#codeGo").click(); });
@@ -673,6 +853,7 @@ async function handleCode(code) {
   $("#scanStatus").innerHTML = `<span class="spinner"></span> Looking up ${code}…`;
   try {
     const f = await lookupBarcode(code);
+    if (mode !== "scan" || $("#scrim").hidden) return;
     if (f) { showDetail(f); return; }
     $("#scanStatus").textContent = "";
     prefillCustom(code, `Barcode ${code} isn't in the database yet. Enter the values from the nutrition label once and it will be found next time you scan it. You can also try Search for a similar product.`);
